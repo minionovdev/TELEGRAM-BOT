@@ -1,0 +1,121 @@
+import urllib.request
+import urllib.parse
+import json
+import time
+
+TOKEN = "YOUR_BOT_TOKEN"
+API = f"https://api.telegram.org/bot{TOKEN}/"
+
+last_update = 0
+warns = {}
+
+# слова-оскорбления
+insults = [
+    "сука",
+    "дебил",
+    "идиот",
+    "тварь",
+    "мразь"
+]
+
+# слова указывающие что это обращение к человеку
+targets = [
+    "ты",
+    "тебя",
+    "твой",
+    "тебе"
+]
+
+
+def api(method, params=None):
+
+    if params:
+        data = urllib.parse.urlencode(params).encode()
+    else:
+        data = None
+
+    req = urllib.request.Request(API + method, data=data)
+    res = urllib.request.urlopen(req)
+
+    return json.loads(res.read())
+
+
+def is_insult(text):
+
+    text = text.lower()
+
+    for t in targets:
+        if t in text:
+            for insult in insults:
+                if insult in text:
+                    return True
+
+    return False
+
+
+def warn_user(chat_id, user_id, name):
+
+    if user_id not in warns:
+        warns[user_id] = 0
+
+    warns[user_id] += 1
+    count = warns[user_id]
+
+    api("sendMessage", {
+        "chat_id": chat_id,
+        "text": f"⚠️ {name}, предупреждение {count}/3"
+    })
+
+    if count >= 3:
+        ban_user(chat_id, user_id)
+
+
+def ban_user(chat_id, user_id):
+
+    api("banChatMember", {
+        "chat_id": chat_id,
+        "user_id": user_id
+    })
+
+    api("sendMessage", {
+        "chat_id": chat_id,
+        "text": "🚫 Пользователь забанен за 3 предупреждения"
+    })
+
+
+while True:
+
+    updates = api("getUpdates", {
+        "offset": last_update + 1
+    })
+
+    for update in updates["result"]:
+
+        last_update = update["update_id"]
+
+        if "message" not in update:
+            continue
+
+        msg = update["message"]
+
+        if "text" not in msg:
+            continue
+
+        text = msg["text"]
+        chat_id = msg["chat"]["id"]
+        message_id = msg["message_id"]
+
+        user = msg["from"]
+        user_id = user["id"]
+        name = user.get("first_name", "User")
+
+        if is_insult(text):
+
+            api("deleteMessage", {
+                "chat_id": chat_id,
+                "message_id": message_id
+            })
+
+            warn_user(chat_id, user_id, name)
+
+    time.sleep(2)
